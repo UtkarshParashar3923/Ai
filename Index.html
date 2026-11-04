@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VectorDB — HNSW + RAG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:     #07070f;
+  --card:   #0c0c18;
+  --border: #151528;
+  --cs:     #00d9ff;
+  --math:   #b388ff;
+  --food:   #ffb74d;
+  --sports: #69f0ae;
+  --accent: #6c63ff;
+  --text:   #cdd6f4;
+  --muted:  #4a4a6a;
+  --red:    #f38ba8;
+  --green:  #a6e3a1;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: 'Fira Code', 'Courier New', monospace;
+  height: 100vh; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+
+/* ── HEADER ── */
+header {
+  background: var(--card); border-bottom: 1px solid var(--border);
+  padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+header h1 {
+  font-size: 17px; font-weight: 600; letter-spacing: 4px;
+  background: linear-gradient(90deg, var(--cs), var(--accent), var(--math));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; letter-spacing: 1px; border: 1px solid var(--border); color: var(--muted); }
+.badge.hl { border-color: var(--accent); color: var(--accent); background: rgba(108,99,255,.12); }
+.badge.ok { border-color: var(--green); color: var(--green); background: rgba(166,227,161,.1); }
+.badge.err { border-color: var(--red); color: var(--red); background: rgba(243,139,168,.1); }
+#statsLabel { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+/* ── LAYOUT ── */
+.layout { display: flex; flex: 1; overflow: hidden; }
+.left-panel { width: 260px; flex-shrink: 0; background: var(--card); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+.center-panel { flex: 1; position: relative; overflow: hidden; }
+#scatter { display: block; width: 100%; height: 100%; }
+.right-panel { width: 360px; flex-shrink: 0; background: var(--card); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+
+/* ── TABS ── */
+.tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab { flex: 1; padding: 10px 6px; text-align: center; font-size: 10px; letter-spacing: 1px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all .2s; }
+.tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; flex: 1; overflow-y: auto; padding: 16px; flex-direction: column; gap: 16px; }
+.tab-content.on { display: flex; }
+
+/* ── COMMON COMPONENTS ── */
+.sec { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+input[type=text], select, textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  padding: 9px 11px; border-radius: 6px; font-family: inherit; font-size: 12px; outline: none; transition: border-color .2s;
+}
+input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
+select option { background: var(--card); }
+input[type=range] { width: 100%; accent-color: var(--accent); background: transparent; border: none; padding: 0; }
+button {
+  width: 100%; padding: 9px 14px; border: none; border-radius: 6px; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 500; letter-spacing: .5px; transition: all .2s;
+}
+.btn-p { background: linear-gradient(135deg, var(--accent), #4f46e5); color: #fff; box-shadow: 0 0 18px rgba(108,99,255,.3); }
+.btn-p:hover { box-shadow: 0 0 28px rgba(108,99,255,.55); transform: translateY(-1px); }
+.btn-p:disabled { opacity: .5; transform: none; cursor: wait; }
+.btn-s { background: var(--border); color: var(--text); }
+.btn-s:hover { background: #1c1c35; }
+.btn-s:disabled { opacity: .5; cursor: wait; }
+.btn-g { background: rgba(166,227,161,.12); color: var(--green); border: 1px solid rgba(166,227,161,.3); }
+.btn-g:hover { background: rgba(166,227,161,.22); }
+.btn-g:disabled { opacity: .5; cursor: wait; }
+
+.algo-row { display: flex; gap: 5px; }
+.algo-btn { flex: 1; padding: 7px 4px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: 10px; cursor: pointer; text-align: center; transition: all .2s; letter-spacing: .5px; font-family: inherit; }
+.algo-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(108,99,255,.12); }
+
+.legend { display: flex; flex-direction: column; gap: 5px; }
+.leg-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── RESULTS ── */
+.results { display: flex; flex-direction: column; gap: 7px; }
+.rcard { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; animation: fadeUp .25s ease; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)} }
+.rcard:hover { border-color: #252545; }
+.rrank { font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-bottom: 3px; }
+.rmeta { font-size: 12px; line-height: 1.4; margin-bottom: 6px; }
+.rfoot { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.rcat  { font-size: 9px; padding: 2px 7px; border-radius: 8px; letter-spacing: .5px; }
+.rdist { font-size: 10px; color: var(--muted); flex: 1; text-align: right; }
+.del   { background: rgba(243,139,168,.12); color: var(--red); border: 1px solid rgba(243,139,168,.25); border-radius: 4px; cursor: pointer; font-size: 10px; padding: 2px 7px; font-family: inherit; transition: background .2s; width: auto; }
+.del:hover { background: rgba(243,139,168,.25); }
+
+/* ── LATENCY / BENCH / LAYERS ── */
+.lat-big { font-size: 32px; font-weight: 600; color: var(--cs); text-shadow: 0 0 20px rgba(0,217,255,.4); }
+.lat-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.bench { display: flex; flex-direction: column; gap: 9px; }
+.brow  { display: flex; flex-direction: column; gap: 3px; }
+.blabel { display: flex; justify-content: space-between; font-size: 10px; }
+.btrack { height: 7px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+.bfill  { height: 100%; border-radius: 4px; transition: width .5s ease; }
+.layers { display: flex; flex-direction: column; gap: 5px; }
+.lrow   { display: flex; align-items: center; gap: 7px; font-size: 10px; }
+.lnum   { width: 18px; text-align: right; color: var(--accent); }
+.ltrack { flex: 1; height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.lfill  { height: 100%; background: var(--accent); border-radius: 3px; opacity: .7; transition: width .4s; }
+.lcount { width: 80px; text-align: right; color: var(--muted); }
+#vecCvs { display: block; width: 100%; background: var(--bg); border-radius: 5px; }
+
+/* ── DOCUMENT LIST ── */
+.doc-list { display: flex; flex-direction: column; gap: 7px; }
+.dcard { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; animation: fadeUp .25s ease; }
+.dcard-title { font-size: 12px; font-weight: 500; margin-bottom: 4px; color: var(--green); }
+.dcard-preview { font-size: 10px; color: var(--muted); line-height: 1.5; margin-bottom: 6px; }
+.dcard-foot { display: flex; justify-content: space-between; align-items: center; }
+.dcard-words { font-size: 9px; color: var(--muted); }
+
+/* ── OLLAMA STATUS ── */
+.ollama-status { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; font-size: 11px; line-height: 1.6; }
+.ollama-status.ok { border-color: rgba(166,227,161,.3); }
+.ollama-status.err { border-color: rgba(243,139,168,.3); }
+
+/* ── CHAT ── */
+.chat-history { display: flex; flex-direction: column; gap: 12px; }
+.chat-q { background: rgba(108,99,255,.12); border: 1px solid rgba(108,99,255,.25); border-radius: 7px; padding: 10px 12px; font-size: 12px; line-height: 1.5; }
+.chat-a { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 12px; }
+.chat-a-label { font-size: 9px; letter-spacing: 2px; color: var(--green); margin-bottom: 6px; }
+.chat-a-text { font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.chat-ctx { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.chat-ctx-label { font-size: 9px; letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; }
+.ctx-chip { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 10px; margin: 2px; background: rgba(108,99,255,.1); border: 1px solid rgba(108,99,255,.2); color: var(--accent); cursor: pointer; }
+.ctx-chip:hover { background: rgba(108,99,255,.2); }
+.ctx-expand { display: none; font-size: 10px; color: var(--muted); line-height: 1.5; margin-top: 6px; padding: 8px; background: #0a0a18; border-radius: 5px; }
+.thinking { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.typing::after { content: '▋'; animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── TOOLTIP ── */
+#tip { position: fixed; display: none; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 7px 11px; font-size: 11px; pointer-events: none; max-width: 220px; z-index: 200; line-height: 1.5; }
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>padhowithPratyush</h1>
+  <span class="badge hl">HNSW</span>
+  <span class="badge">KD-TREE</span>
+  <span class="badge">BRUTE FORCE</span>
+  <span class="badge" id="ollamaBadge">OLLAMA…</span>
+  <span id="statsLabel">loading…</span>
+</header>
+
+<div class="layout">
+
+  <!-- ══ LEFT PANEL ══ -->
+  <div class="left-panel">
+    <div>
+      <div class="sec">Query (Demo Vectors)</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <input type="text" id="qInput" placeholder="binary tree, sushi, basketball…" />
+        <button class="btn-p" onclick="runSearch()">⚡ SEARCH</button>
+      </div>
+    </div>
+    <div>
+      <div class="sec">Algorithm</div>
+      <div class="algo-row">
+        <div class="algo-btn on" data-algo="hnsw"      onclick="setAlgo(this)">HNSW</div>
+        <div class="algo-btn"   data-algo="kdtree"     onclick="setAlgo(this)">KD-TREE</div>
+        <div class="algo-btn"   data-algo="bruteforce" onclick="setAlgo(this)">BRUTE</div>
+      </div>
+    </div>
+    <div>
+      <div class="sec">Distance Metric</div>
+      <select id="metric">
+        <option value="cosine">Cosine Similarity</option>
+        <option value="euclidean">Euclidean Distance</option>
+        <option value="manhattan">Manhattan Distance</option>
+      </select>
+    </div>
+    <div>
+      <div class="sec">Top-K: <span id="kLabel">5</span></div>
+      <input type="range" id="kSlider" min="1" max="10" value="5"
+             oninput="document.getElementById('kLabel').textContent=this.value">
+    </div>
+    <div>
+      <div class="sec">Category Legend</div>
+      <div class="legend">
+        <div class="leg-row"><div class="dot" style="background:var(--cs);box-shadow:0 0 5px var(--cs)"></div>CS / Algorithms</div>
+        <div class="leg-row"><div class="dot" style="background:var(--math);box-shadow:0 0 5px var(--math)"></div>Mathematics</div>
+        <div class="leg-row"><div class="dot" style="background:var(--food);box-shadow:0 0 5px var(--food)"></div>Food &amp; Cooking</div>
+        <div class="leg-row"><div class="dot" style="background:var(--sports);box-shadow:0 0 5px var(--sports)"></div>Sports &amp; Games</div>
+        <div class="leg-row"><div class="dot" style="background:var(--green);box-shadow:0 0 5px var(--green)"></div>Documents (RAG)</div>
+      </div>
+    </div>
+    <div>
+      <div class="sec">Insert Demo Vector</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <input type="text" id="addMeta" placeholder="Description…" />
+        <select id="addCat">
+          <option value="cs">CS / Algorithms</option>
+          <option value="math">Mathematics</option>
+          <option value="food">Food &amp; Cooking</option>
+          <option value="sports">Sports &amp; Games</option>
+        </select>
+        <button class="btn-s" onclick="addVector()">+ INSERT</button>
+      </div>
+    </div>
+    <div>
+      <div class="sec">Benchmark</div>
+      <button class="btn-s" onclick="runBenchmark()">▶ COMPARE ALL ALGOS</button>
+    </div>
+  </div>
+
+  <!-- ══ CENTER: SCATTER PLOT ══ -->
+  <div class="center-panel"><canvas id="scatter"></canvas></div>
+
+  <!-- ══ RIGHT PANEL: TABS ══ -->
+  <div class="right-panel">
+    <div class="tabs">
+      <div class="tab on"  onclick="switchTab('search')">SEARCH</div>
+      <div class="tab"     onclick="switchTab('docs')">DOCUMENTS</div>
+      <div class="tab"     onclick="switchTab('rag')">ASK AI</div>
+    </div>
+
+    <!-- TAB: SEARCH -->
+    <div class="tab-content on" id="tab-search">
+      <div>
+        <div class="sec">Search Latency</div>
+        <div class="lat-big" id="latBig">—</div>
+        <div class="lat-sub" id="latSub">No query yet</div>
+      </div>
+      <div>
+        <div class="sec">Top Matches</div>
+        <div class="results" id="results">
+          <div style="color:var(--muted);font-size:11px">Run a search to see results…</div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Query Embedding (16D)</div>
+        <canvas id="vecCvs" height="76"></canvas>
+      </div>
+      <div id="benchSec" style="display:none">
+        <div class="sec">Algorithm Comparison</div>
+        <div class="bench" id="benchBars"></div>
+      </div>
+      <div>
+        <div class="sec">HNSW Graph Layers</div>
+        <div class="layers" id="layers">
+          <div style="color:var(--muted);font-size:11px">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: DOCUMENTS -->
+    <div class="tab-content" id="tab-docs">
+      <div>
+        <div class="sec">Ollama Status</div>
+        <div class="ollama-status" id="ollamaStatus">Checking…</div>
+      </div>
+      <div>
+        <div class="sec">Insert Document</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input type="text" id="docTitle" placeholder="Document title / topic…" />
+          <textarea id="docText" placeholder="Paste your notes, textbook excerpt, lecture content…&#10;&#10;Long text is automatically split into overlapping chunks and each chunk gets its own real embedding via Ollama's nomic-embed-text model."></textarea>
+          <button class="btn-g" id="insertDocBtn" onclick="insertDocument()">⚡ EMBED &amp; INSERT</button>
+          <div id="insertStatus" style="font-size:11px;color:var(--muted)"></div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Stored Documents (<span id="docCountLabel">0</span>)</div>
+        <div class="doc-list" id="docList">
+          <div style="color:var(--muted);font-size:11px">No documents yet. Insert some above.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: ASK AI (RAG) -->
+    <div class="tab-content" id="tab-rag">
+      <div>
+        <div class="sec">Ask a Question</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <textarea id="ragQuestion" rows="3" placeholder="What is dynamic programming?&#10;Explain the main idea of HNSW.&#10;How does the recipe differ from…"></textarea>
+          <div style="display:flex;gap:6px">
+            <select id="ragK" style="width:auto;flex-shrink:0">
+              <option value="2">Top 2</option>
+              <option value="3" selected>Top 3</option>
+              <option value="5">Top 5</option>
+            </select>
+            <button class="btn-g" id="askBtn" onclick="askAI()" style="flex:1">🤖 ASK AI</button>
+          </div>
+          <div style="font-size:10px;color:var(--muted)">Uses your inserted documents as context. Answers come from the local LLM.</div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Conversation</div>
+        <div class="chat-history" id="chatHistory">
+          <div style="color:var(--muted);font-size:11px">Ask a question about your inserted documents…</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end right-panel -->
+</div><!-- end layout -->
+
+<div id="tip"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ════════════════════════════════════════════════════════════
+const API  = 'http://localhost:8080';
+const DIMS = 16;
+const COL  = { cs:'#00d9ff', math:'#b388ff', food:'#ffb74d', sports:'#69f0ae', doc:'#a6e3a1', default:'#90a4ae' };
+const DIM_COL = ['#00d9ff','#00d9ff','#00d9ff','#00d9ff','#b388ff','#b388ff','#b388ff','#b388ff',
+                 '#ffb74d','#ffb74d','#ffb74d','#ffb74d','#69f0ae','#69f0ae','#69f0ae','#69f0ae'];
+
+// ════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════
+let allItems = [], pcaPoints = [], hitIds = new Set(), queryPt = null;
+let hoverItem = null, pulse = 0, selAlgo = 'hnsw', searchResults = [];
+
+// ════════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['search','docs','rag'];
+    t.classList.toggle('on', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('on'));
+  document.getElementById('tab-' + name).classList.add('on');
+  if (name === 'docs') loadDocList();
+}
+
+// ════════════════════════════════════════════════════════════
+//  TEXT → 16-D EMBEDDING (for demo vectors)
+// ════════════════════════════════════════════════════════════
+const KW = {
+  cs:     ['algorithm','data','tree','graph','array','linked','hash','stack','queue','sort','binary','dynamic','programming','recursion','complexity','pointer','node','search','insert','bfs','dfs','heap','trie'],
+  math:   ['calculus','matrix','probability','theorem','integral','derivative','linear','algebra','equation','function','prime','modular','combinatorics','permutation','eigenvalue','statistics','proof'],
+  food:   ['food','pizza','sushi','ramen','pasta','recipe','cook','eat','restaurant','dish','ingredient','flavor','spice','noodle','bread','croissant','taco','fish','rice','soup'],
+  sports: ['sport','basketball','football','tennis','chess','swim','game','play','score','team','athlete','competition','match','tournament','olympic','dribble','tackle','serve']
+};
+
+function textToEmbedding(text) {
+  const t = text.toLowerCase(), ws = t.split(/\s+/);
+  const s = {cs:0,math:0,food:0,sports:0};
+  for (const w of ws)
+    for (const [cat, kws] of Object.entries(KW))
+      for (const kw of kws) if (w.includes(kw)||kw.startsWith(w)) { s[cat]+=0.35; break; }
+  const mx = Math.max(...Object.values(s), 0.01);
+  const n = v => Math.min(v/mx*0.88, 0.94);
+  const jitter = () => (Math.random()-.5)*.04;
+  const emb = new Array(16).fill(0.08);
+  const fill = (i,score) => {
+    if (score<.01) return;
+    const b = n(score);
+    emb[i]=Math.max(.05,b+jitter()); emb[i+1]=Math.max(.05,b+jitter());
+    emb[i+2]=Math.max(.05,b*.92+jitter()); emb[i+3]=Math.max(.05,b*.87+jitter());
+  };
+  fill(0,s.cs); fill(4,s.math); fill(8,s.food); fill(12,s.sports);
+  return emb;
+}
+
+// ════════════════════════════════════════════════════════════
+//  PCA
+// 
